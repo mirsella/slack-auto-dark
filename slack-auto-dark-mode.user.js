@@ -1,10 +1,12 @@
 // ==UserScript==
 // @name         Slack Auto Dark Mode (Follow System)
 // @namespace    https://github.com/mirsella/slack-auto-dark
-// @version      2.1.0
+// @version      2.1.1
 // @description  Automatically toggle Slack web (app.slack.com) dark/light mode based on device system theme (prefers-color-scheme).
 // @author       you
 // @match        https://app.slack.com/*
+// @updateURL    https://raw.githubusercontent.com/mirsella/slack-auto-dark/main/slack-auto-dark-mode.user.js
+// @downloadURL  https://raw.githubusercontent.com/mirsella/slack-auto-dark/main/slack-auto-dark-mode.user.js
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=slack.com
 // @run-at       document-idle
 // @noframes
@@ -47,9 +49,6 @@
     }
   }
 
-  const findExact = (selector, text) =>
-    Array.from(document.querySelectorAll(selector)).find((e) => norm(e.textContent) === norm(text)) || null;
-
   function findMenuItem(text) {
     const menu = document.querySelector('[role="menu"]');
     if (!menu) return null;
@@ -66,11 +65,6 @@
     return () => style.remove();
   }
 
-  function closePrefs() {
-    document.querySelector('button[data-qa="sk_close_modal_button"]')?.click();
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-  }
-
   let busy = false;
 
   async function apply(dark) {
@@ -82,15 +76,22 @@
     try {
       (await waitFor(() => document.querySelector('button[data-qa="user-button"]'), 'user menu')).click();
       (await waitFor(() => findMenuItem('Preferences'), 'Preferences item')).click();
-      (await waitFor(() => findExact('button[data-qa="tabs_item"],[role="tab"]', 'Appearance'), 'Appearance tab')).click();
+      // The label can include badges such as "New"; the tab ID stays unchanged.
+      (await waitFor(() => document.querySelector('.p-prefs_dialog button[data-qa="tabs_item"]#themes'), 'Appearance tab')).click();
       (await waitFor(() => document.querySelector(`input[name="color-mode"][value="${want}"]`), want + ' radio')).click();
       await waitFor(() => (mode() === want ? document.body : null), 'theme save');
       console.log(LOG, 'now ' + mode());
     } catch (e) {
       console.warn(LOG, 'toggle failed:', e?.message || e);
     } finally {
-      closePrefs();
-      await waitFor(() => (!document.querySelector('[role="dialog"]') ? document.body : null), 'dialog close', 3000)
+      document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      await waitFor(() => {
+        // Ignore other mounted dialogs, and retry if a theme save re-renders Preferences.
+        const dialog = document.querySelector('.p-prefs_dialog');
+        if (!dialog) return true;
+        dialog.querySelector('button[data-qa="sk_close_modal_button"]')?.click();
+        return false;
+      }, 'dialog close', 3000)
         .catch(() => console.warn(LOG, 'prefs dialog still open'));
       unhide();
       busy = false;
